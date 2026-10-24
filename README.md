@@ -26,7 +26,7 @@ The API now requires a Firebase ID token on every endpoint except `GET /api/heal
 
 Deploy `firestore.rules` and `storage.rules` with Firebase CLI after reviewing the project and database target. Storage uploads are optional and attempted only after a real image generation response. If the bucket is not provisioned or the upload is denied, the UI keeps the generated image in the current session and explicitly labels it temporary. The project does not enable Firebase Storage or billing automatically.
 
-For image generation, set `IMAGE_GENERATION_MODEL=gemini-3-pro-image` (Nano Banana Pro, Gemini 3 Pro Image). Google lists this model as paid-only, so the Gemini API project behind `GEMINI_API_KEY` needs billing enabled. The app calls the configured model through Gemini `generateContent`, never substitutes another model, and reports API errors (missing model, no permission, no quota, safety block) instead of faking a result. The capability flag means configured, not verified: availability is proven only by a real generation request. See `PHASE4_NOTES.md`.
+For image generation, configure `IMAGE_GENERATION_MODEL=gemini-3.1-flash-image` only after confirming that model access is available for your Google AI Studio API key. The app uses the configured model through the Gemini `generateContent` image response path and reports API errors rather than substituting a text model. The capability flag means configured, not verified; availability is verified only by a real generation request.
 
 
 ## Phase 3 features

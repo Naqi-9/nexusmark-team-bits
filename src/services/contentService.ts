@@ -1,7 +1,7 @@
 import {
-  collection, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, query, where, writeBatch,
+  collection, doc, getDocs, setDoc, updateDoc, deleteDoc, query, where, writeBatch,
 } from 'firebase/firestore';
-import { db, auth, deleteStoredImage } from '../lib/firebase.ts';
+import { db, auth } from '../lib/firebase.ts';
 import { omitUndefinedDeep } from '../lib/firestoreSanitize.ts';
 import { normalizeModelUsed } from '../lib/chatMessage.ts';
 import {
@@ -90,15 +90,7 @@ export async function updateContentItem(
 }
 
 export async function deleteContentItem(id: string): Promise<void> {
-  // Remember the attached image first so it is not orphaned in Storage after the Firestore delete.
-  let assetUrl = '';
-  try {
-    const snap = await getDoc(doc(db, COL, id));
-    const v = snap.exists() ? snap.data()?.imageAssetUrl : '';
-    if (typeof v === 'string') assetUrl = v;
-  } catch { /* the delete below still proceeds */ }
   await deleteDoc(doc(db, COL, id)); // only ever called from an explicit user action
-  if (assetUrl) await deleteStoredImage(assetUrl); // best effort, never throws
 }
 
 export async function duplicateContentItem(src: ContentItemRecord): Promise<ContentItemRecord> {

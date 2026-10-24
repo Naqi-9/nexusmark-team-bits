@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { colord } from 'colord';
-import { Download, ImageIcon, Loader2, RefreshCw, Wand2 } from 'lucide-react';
+import { Download, ImageIcon, Loader2, Wand2 } from 'lucide-react';
 import { ASPECT_RATIOS, type AspectRatio, type ContentPayload } from '../../lib/contentTypes.ts';
 import { contentApi } from '../../lib/contentApi.ts';
 import { persistGeneratedImage, authenticatedFetch } from '../../lib/firebase.ts';
@@ -22,7 +22,7 @@ interface Props {
   aspectRatio: AspectRatio;
   onAspectRatioChange: (a: AspectRatio) => void;
   brand: BrandAssets;
-  imageCapability: { configured: boolean; model: string | null; paidOnly?: boolean } | null;
+  imageCapability: { configured: boolean; model: string | null } | null;
   /** Increment to make the AI design the post automatically (Magic Design). 0 / undefined = never. */
   magicToken?: number;
   /** Called once the token has been acted on, so remounting this view never regenerates by accident. */
@@ -67,17 +67,6 @@ function loadImage(src: string): Promise<HTMLImageElement | null> {
     img.src = src;
   });
 }
-
-function base64ToBlob(b64: string, mime: string): Blob {
-  const bin = atob(b64);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return new Blob([bytes], { type: mime });
-}
-
-const extForMime = (mime: string) => (mime.includes('jpeg') || mime.includes('jpg') ? 'jpg' : mime.includes('webp') ? 'webp' : 'png');
-/** Firebase Storage rules accept uploads below 10 MB. Leave headroom. */
-const MAX_UPLOAD_BYTES = 9.5 * 1024 * 1024;
 
 /** Renders a simple on-brand text card locally. It is a template, NOT an AI-generated image. */
 async function renderBrandCard(canvas: HTMLCanvasElement, content: ContentPayload, ratio: AspectRatio, brand: BrandAssets) {
@@ -127,10 +116,7 @@ async function renderBrandCard(canvas: HTMLCanvasElement, content: ContentPayloa
  * the brand name and the logo. The text is drawn locally so spelling and brand fonts are always correct.
  */
 async function renderComposedPost(canvas: HTMLCanvasElement, bg: HTMLImageElement, content: ContentPayload, ratio: AspectRatio, brand: BrandAssets) {
-  // Keep the model's resolution (never smaller than the standard social size, capped to keep files uploadable).
-  const std = ASPECT_RATIOS[ratio];
-  const width = Math.min(Math.max(std.width, bg.naturalWidth || bg.width), 2560);
-  const height = Math.round((width * std.height) / std.width);
+  const { width, height } = ASPECT_RATIOS[ratio];
   canvas.width = width; canvas.height = height;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Canvas is not available in this browser.');
@@ -158,9 +144,9 @@ async function renderComposedPost(canvas: HTMLCanvasElement, bg: HTMLImageElemen
   const brandY = height - pad - brandSize;
   let y = brandY - brandSize * 1.2 - blockH;
 
-  ctx.fillStyle = accent; ctx.fillRect(pad, y, Math.max(10, Math.round(width * 0.009)), blockH);
+  ctx.fillStyle = accent; ctx.fillRect(pad, y, 10, blockH);
   ctx.fillStyle = '#FFFFFF'; ctx.font = `800 ${size}px ${font}`;
-  ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = Math.round(width * 0.011);
+  ctx.shadowColor = 'rgba(0,0,0,0.35)'; ctx.shadowBlur = 12;
   for (const l of lines) { ctx.fillText(l, pad + 28, y); y += lineH; }
   ctx.shadowBlur = 0;
 
@@ -180,28 +166,14 @@ async function renderComposedPost(canvas: HTMLCanvasElement, bg: HTMLImageElemen
   }
 }
 
-type Stage = 'generating' | 'composing' | 'saving';
-const STAGE_LABEL: Record<Stage, string> = {
-  generating: 'Generating the image with the image model…',
-  composing: 'Adding headline, brand name and logo…',
-  saving: 'Saving the image to your Firebase Storage…',
-};
-
 export function CreativePreview({ content, workspaceId, onImageAssetSaved, aspectRatio, onAspectRatioChange, brand, imageCapability, magicToken = 0, onMagicConsumed, savedImageUrl }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [cardError, setCardError] = useState<string | null>(null);
-  const [aiImage, setAiImage] = useState<{ dataUrl: string; rawBase64: string; rawMime: string; rawDataUrl: string; composed: boolean; composedMime: string; model: string; ratio: AspectRatio; assetUrl?: string } | null>(null);
+  const [aiImage, setAiImage] = useState<{ dataUrl: string; rawDataUrl: string; composed: boolean; model: string; ratio: AspectRatio; assetUrl?: string } | null>(null);
   const lastMagic = useRef(0);
-  const genLock = useRef(false);            // set synchronously, so a double click can never start two requests
-  const [stage, setStage] = useState<Stage | null>(null);
-  const [imgError, setImgError] = useState<string | null>(null);   // generation failed
-  const [saveWarn, setSaveWarn] = useState<string | null>(null);   // image exists but is NOT persisted
-  const [dlError, setDlError] = useState<string | null>(null);
-  const [savedBroken, setSavedBroken] = useState(false);
-  const imgBusy = stage !== null;
+  const [imgBusy, setImgBusy] = useState(false);
+  const [imgError, setImgError] = useState<string | null>(null);
   const brandKey = useMemo(() => JSON.stringify(brand), [brand]);
-
-  useEffect(() => { setSavedBroken(false); }, [savedImageUrl]);
 
   useEffect(() => {
     let cancelled = false;
@@ -219,42 +191,37 @@ export function CreativePreview({ content, workspaceId, onImageAssetSaved, aspec
   };
 
   const generateImage = async () => {
-    if (genLock.current) return;
-    genLock.current = true;
-    setStage('generating'); setImgError(null); setSaveWarn(null); setDlError(null);
+    if (imgBusy) return;
+    setImgBusy(true); setImgError(null);
     try {
       const prompt = buildImagePrompt(content, brand.palette, brand.businessName);
       const res = await contentApi.image(prompt, aspectRatio, workspaceId);
       const rawDataUrl = `data:${res.mimeType};base64,${res.imageBase64}`;
 
-      // Show the real model output immediately; composition only adds the headline on top.
-      let finalDataUrl = rawDataUrl; let composed = false; let composedMime = res.mimeType;
-      setStage('composing');
+      // Compose the finished post (image + headline + brand + logo). If that fails, keep the raw image.
+      let finalDataUrl = rawDataUrl; let composed = false;
       try {
         const bg = await loadImage(rawDataUrl);
         if (!bg) throw new Error('image decode failed');
         const off = document.createElement('canvas');
         await renderComposedPost(off, bg, content, aspectRatio, brand);
-        finalDataUrl = off.toDataURL('image/png'); composedMime = 'image/png';
-        if (finalDataUrl.length * 0.75 > MAX_UPLOAD_BYTES) { finalDataUrl = off.toDataURL('image/jpeg', 0.92); composedMime = 'image/jpeg'; }
-        composed = true;
+        finalDataUrl = off.toDataURL('image/png'); composed = true;
       } catch (composeErr) {
         console.warn('[CreativePreview] compose failed, showing raw image', composeErr);
       }
-      setAiImage({ dataUrl: finalDataUrl, rawBase64: res.imageBase64, rawMime: res.mimeType, rawDataUrl, composed, composedMime, model: res.modelUsed, ratio: aspectRatio });
+      setAiImage({ dataUrl: finalDataUrl, rawDataUrl, composed, model: res.modelUsed, ratio: aspectRatio });
 
-      setStage('saving');
       try {
         const base64 = composed ? finalDataUrl.split(',')[1] : res.imageBase64;
-        const asset = await persistGeneratedImage(workspaceId, base64, composed ? composedMime : res.mimeType);
+        const asset = await persistGeneratedImage(workspaceId, base64, composed ? 'image/png' : res.mimeType);
         setAiImage(prev => prev ? { ...prev, assetUrl: asset.url } : prev);
         onImageAssetSaved?.(asset.url);
       } catch (storageErr) {
-        setSaveWarn(`The image was generated but NOT saved to Firebase Storage, so it will disappear on refresh. Download it now. (${storageErr instanceof Error ? storageErr.message : 'Storage upload failed'})`);
+        setImgError(`Design created, but could not be persisted to Firebase Storage. It is temporary for this session, so download it. ${storageErr instanceof Error ? storageErr.message : ''}`.trim());
       }
     } catch (e) {
       setImgError(e instanceof Error ? e.message : 'Image generation failed.');
-    } finally { genLock.current = false; setStage(null); }
+    } finally { setImgBusy(false); }
   };
 
   // Magic Design: Content Studio bumps the token and the AI designs this post immediately.
@@ -267,34 +234,13 @@ export function CreativePreview({ content, workspaceId, onImageAssetSaved, aspec
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [magicToken, imageCapability]);
 
-  const stem = () => `${slugify(brand.businessName)}-${slugify(content.title)}-${(aiImage?.ratio || aspectRatio).replace(':', 'x')}`;
-
-  /** The untouched model output, in the exact format and resolution the model returned. */
-  const downloadOriginal = () => {
+  const downloadAi = () => {
     if (!aiImage) return;
-    try { downloadBlob(`${stem()}-original.${extForMime(aiImage.rawMime)}`, base64ToBlob(aiImage.rawBase64, aiImage.rawMime)); setDlError(null); }
-    catch { setDlError('Download failed. The image data could not be prepared. Try generating it again.'); }
+    fetch(aiImage.dataUrl).then(r => r.blob()).then(b => downloadBlob(`${slugify(content.title)}-${aiImage.ratio.replace(':', 'x')}-${aiImage.composed ? 'post' : 'ai'}.png`, b));
   };
-  const downloadPost = () => {
+  const downloadRaw = () => {
     if (!aiImage) return;
-    try {
-      const mime = aiImage.composed ? aiImage.composedMime : aiImage.rawMime;
-      const b64 = (aiImage.composed ? aiImage.dataUrl : aiImage.rawDataUrl).split(',')[1];
-      downloadBlob(`${stem()}-post.${extForMime(mime)}`, base64ToBlob(b64, mime)); setDlError(null);
-    } catch { setDlError('Download failed. The image data could not be prepared. Try generating it again.'); }
-  };
-  /** Saved image after a refresh. Cross-origin fetch needs bucket CORS; if the browser blocks it, open the file instead. */
-  const downloadSaved = async () => {
-    if (!savedImageUrl) return;
-    try {
-      const r = await fetch(savedImageUrl);
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const blob = await r.blob();
-      downloadBlob(`${stem()}-saved.${extForMime(blob.type || 'image/png')}`, blob); setDlError(null);
-    } catch {
-      const w = window.open(savedImageUrl, '_blank', 'noopener');
-      setDlError(w ? 'Your browser blocked a direct download, so the image opened in a new tab. Right-click or long-press it to save.' : 'Download failed and the pop-up was blocked. Allow pop-ups for this site and try again.');
-    }
+    fetch(aiImage.rawDataUrl).then(r => r.blob()).then(b => downloadBlob(`${slugify(content.title)}-${aiImage.ratio.replace(':', 'x')}-background.png`, b));
   };
 
   const { width, height } = ASPECT_RATIOS[aspectRatio];
@@ -322,55 +268,39 @@ export function CreativePreview({ content, workspaceId, onImageAssetSaved, aspec
         </div>
 
         <div className="space-y-2">
-          <div className="text-xs font-semibold text-gray-700">AI generated image</div>
+          <div className="text-xs font-semibold text-gray-700">AI post design</div>
           {imageCapability?.configured ? (
             <>
               <button className={primaryBtn} onClick={generateImage} disabled={imgBusy || !(content.imagePrompt.trim() || content.title.trim())}>
-                {imgBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : imgError ? <RefreshCw className="w-4 h-4" /> : <ImageIcon className="w-4 h-4" />}
-                {imgBusy ? 'Working…' : imgError ? 'Retry image' : aiImage ? 'Regenerate image' : 'Generate image'}
+                {imgBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImageIcon className="w-4 h-4" />}
+                {imgBusy ? 'Designing your post…' : aiImage ? 'Redesign post' : 'Design this post'}
               </button>
-              <p className="text-[11px] text-gray-500">
-                Uses the configured image model ({imageCapability.model}) from your visual brief. Your headline, brand name and logo are added on top by NexusMark so the text is always spelled correctly.
-                {imageCapability.paidOnly ? ' Google lists this model as paid-only, so each image is billed to the Gemini API project behind your key.' : ''}
-              </p>
-              {imgBusy && stage && (
-                <div role="status" aria-live="polite"><Notice tone="info"><span className="inline-flex items-center gap-1.5"><Loader2 className="w-3.5 h-3.5 animate-spin" /> {STAGE_LABEL[stage]}{stage === 'generating' ? ' This can take up to two minutes.' : ''}</span></Notice></div>
+              <p className="text-[11px] text-gray-500">Uses the configured image model ({imageCapability.model}) for the picture. Your headline, brand name and logo are added on top by NexusMark so the text is always spelled correctly.</p>
+              {imgBusy && magicToken > 0 && (
+                <Notice tone="info"><span className="inline-flex items-center gap-1.5"><Wand2 className="w-3.5 h-3.5" /> Magic Design is creating the post from your calendar entry. This can take up to a minute.</span></Notice>
               )}
-              {imgBusy && magicToken > 0 && stage === 'generating' && (
-                <Notice tone="info"><span className="inline-flex items-center gap-1.5"><Wand2 className="w-3.5 h-3.5" /> Magic Design is creating the post from your calendar entry.</span></Notice>
-              )}
-              {imgError && <div role="alert"><Notice tone="error">{imgError} Your written content is unchanged.</Notice></div>}
-              {saveWarn && <div role="alert"><Notice tone="warn">{saveWarn}</Notice></div>}
-              {dlError && <div role="alert"><Notice tone="error">{dlError}</Notice></div>}
+              {imgError && <Notice tone="error">{imgError}</Notice>}
               {aiImage && (
                 <div className="space-y-2">
-                  <img src={aiImage.dataUrl} alt={`AI generated image for ${content.title}`} className="rounded-lg border border-gray-200 max-h-[420px] w-auto max-w-full" />
-                  <p className="text-[11px] text-gray-500">
-                    Generated by {aiImage.model} for {aiImage.ratio}{aiImage.composed ? ', with headline, brand name and logo added.' : '. The headline overlay could not be added, so this is the picture only.'}{' '}
-                    {aiImage.assetUrl ? 'Uploaded to your private Firebase Storage folder. Press Save so it stays attached to this deliverable in your Library.' : saveWarn ? 'Not saved.' : 'Not saved yet.'}
-                  </p>
+                  <img src={aiImage.dataUrl} alt={`AI designed post for ${content.title}`} className="rounded-lg border border-gray-200 max-h-[420px] w-auto max-w-full" />
+                  <p className="text-[11px] text-gray-500">Picture by {aiImage.model} for {aiImage.ratio}{aiImage.composed ? ', with headline, brand name and logo added.' : '. The headline overlay could not be added, so this is the picture only.'} {aiImage.assetUrl ? 'Saved to Firebase Storage.' : 'Temporary for this session unless downloaded.'}</p>
                   <div className="flex flex-wrap gap-2">
-                    <button className={ghostBtn} onClick={downloadOriginal}><Download className="w-3.5 h-3.5" /> Download image ({extForMime(aiImage.rawMime).toUpperCase()}, original)</button>
-                    {aiImage.composed && <button className={ghostBtn} onClick={downloadPost}><Download className="w-3.5 h-3.5" /> Download post with headline</button>}
+                    <button className={ghostBtn} onClick={downloadAi}><Download className="w-3.5 h-3.5" /> Download {aiImage.composed ? 'final post' : 'image'}</button>
+                    {aiImage.composed && <button className={ghostBtn} onClick={downloadRaw}><Download className="w-3.5 h-3.5" /> Background only</button>}
                   </div>
                 </div>
               )}
               {!aiImage && savedImageUrl && (
                 <div className="space-y-2">
-                  {savedBroken ? (
-                    <Notice tone="warn">The saved image could not be loaded. It may have been deleted from Storage, or you may be offline. Generate it again to replace it.</Notice>
-                  ) : (
-                    <img src={savedImageUrl} onError={() => setSavedBroken(true)} alt={`Saved image for ${content.title}`} className="rounded-lg border border-gray-200 max-h-[420px] w-auto max-w-full" />
-                  )}
-                  <p className="text-[11px] text-gray-500">Saved image for this deliverable.</p>
-                  {!savedBroken && <button className={ghostBtn} onClick={downloadSaved}><Download className="w-3.5 h-3.5" /> Download saved image</button>}
+                  <img src={savedImageUrl} alt={`Saved design for ${content.title}`} className="rounded-lg border border-gray-200 max-h-[420px] w-auto max-w-full" />
+                  <p className="text-[11px] text-gray-500">Saved design for this entry.</p>
                 </div>
               )}
             </>
           ) : (
             <Notice tone="warn">
               No image generation model is configured on the server, so only the creative brief and brand card are available.
-              Set <code>IMAGE_GENERATION_MODEL</code> (for Nano Banana Pro: <code>gemini-3-pro-image</code>) to enable real images.
+              Set <code>IMAGE_GENERATION_MODEL</code> to enable real graphics.
             </Notice>
           )}
         </div>

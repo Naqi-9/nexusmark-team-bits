@@ -26,19 +26,3 @@ export function findUnsupportedClaims(text: string, contextJson: string): string
   }
   return warnings;
 }
-
-/** Stock marketing phrases that make copy read as generic AI output. Flagged for the user, never auto-rewritten. */
-const CLICHES: RegExp[] = [
-  /unlock (?:your|the) (?:full )?potential/i, /take your (?:brand|business) to the next level/i, /revolutioni[sz]e/i,
-  /game[- ]?changer/i, /elevate your/i, /in today'?s fast[- ]paced world/i, /\bseamless(?:ly)?\b/i, /cutting[- ]edge/i,
-  /\bdive in\b/i, /supercharge/i, /look no further/i, /don'?t miss out/i, /your journey/i, /\bsay goodbye to\b/i,
-];
-
-export function findCliches(text: string): string[] {
-  const hits = new Set<string>();
-  for (const re of CLICHES) {
-    const m = text.match(re);
-    if (m) hits.add(m[0].toLowerCase());
-  }
-  return [...hits].map(h => `Uses the stock phrase "${h}". Consider rewriting it in the brand's own words.`);
-}

@@ -14,14 +14,10 @@ export function buildImagePrompt(content: ContentPayload, palette: string[], bus
     content.creativeBrief?.composition && `Composition: ${content.creativeBrief.composition}`,
     businessName && `Brand: ${businessName}.`,
     palette.length ? `Use this brand palette: ${palette.slice(0, 5).join(', ')}.` : '',
+    'Professional social media post background, clean negative space for a headline. No text, letters, numbers, watermarks or logos in the image.',
   ].filter(Boolean) as string[];
-  // The guard tail is appended AFTER trimming so a long brief can never cut it off.
-  const tail = 'Photorealistic commercial photography with believable lighting, real materials and accurate proportions. One clear focal subject, uncluttered background, clean negative space for a headline. Do not invent packaging, labels or brand marks. No text, letters, numbers, watermarks or logos in the image.';
-  const head = parts.join(' ').slice(0, MAX_PROMPT - tail.length - 1).trimEnd();
-  return `${head} ${tail}`;
+  return parts.join(' ').slice(0, 1500);
 }
-
-const MAX_PROMPT = 1500;
 
 /** Upcoming calendar entries first (today onwards, soonest first), then past ones, newest first. */
 export function sortCalendarForMagic(items: ContentItemRecord[], today: string): ContentItemRecord[] {
