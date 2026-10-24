@@ -188,7 +188,7 @@ apiRouter.post('/generate-deliverable', requireOwnedWorkspace, async (req: Reque
 function sendContentError(res: Response, err: unknown, label: string) {
   console.error(`[Content] ${label} error:`, err);
   if (err instanceof StrategistError) {
-    return res.status(err.status).json({ error: err.message, code: err.code, retryable: err.code !== 'not_configured' && err.code !== 'unsupported_model' });
+    return res.status(err.status).json({ error: err.message, code: err.code, retryable: !['not_configured', 'unsupported_model', 'model_not_found', 'permission_denied', 'billing_required'].includes(err.code) });
   }
   return res.status(500).json({ error: 'Something went wrong. Please retry.', code: 'generation_failed', retryable: true });
 }
@@ -254,7 +254,7 @@ apiRouter.post('/content/image', requireOwnedWorkspace, async (req: Request, res
   const parsed = ImageRequestSchema.safeParse(req.body);
   if (!parsed.success) return badRequest(res, parsed.error);
   try {
-    return res.json(await generateBrandImage(parsed.data));
+    return res.json(await generateBrandImage(parsed.data, { uid: req.firebaseUser?.uid || 'anon', workspaceId: String(req.body?.workspaceId || '') }));
   } catch (err) {
     return sendContentError(res, err, 'image');
   }

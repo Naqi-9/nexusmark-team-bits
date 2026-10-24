@@ -448,7 +448,8 @@ export const analyzeBrandWithGemini = analyzeBrandWithGemma;
 // -------------------------------------------------------------
 export class StrategistError extends Error {
   status: number;
-  code: 'not_configured' | 'rate_limited' | 'timeout' | 'empty_response' | 'invalid_output' | 'generation_failed' | 'unsupported_model';
+  code: 'not_configured' | 'rate_limited' | 'timeout' | 'empty_response' | 'invalid_output' | 'generation_failed' | 'unsupported_model'
+    | 'model_not_found' | 'permission_denied' | 'billing_required' | 'blocked';
   constructor(code: StrategistError['code'], message: string, status: number) {
     super(message);
     this.code = code;

@@ -1,7 +1,7 @@
 import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
-import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import fileConfig from '../../firebase-applet-config.json';
 
 // Values in firebase-applet-config.json are the defaults. If VITE_FIREBASE_* variables are set at build
@@ -130,4 +130,24 @@ export async function persistGeneratedImage(workspaceId: string, imageBase64: st
   const objectRef = storageRef(storage, path);
   await uploadBytes(objectRef, bytes, { contentType: mimeType, customMetadata: { ownerUid: currentUser.uid, workspaceId } });
   return { url: await getDownloadURL(objectRef), path };
+}
+
+/**
+ * Best-effort removal of a generated image when its deliverable is deleted. Never throws: a failed cleanup must not
+ * block the user's delete. Only objects inside the signed-in user's own namespace are ever touched.
+ */
+export async function deleteStoredImage(assetUrl: string): Promise<boolean> {
+  try {
+    const uid = auth.currentUser?.uid;
+    const bucket = firebaseConfig.storageBucket;
+    if (!uid || !bucket || !assetUrl) return false;
+    const storage = getStorage(app, `gs://${bucket}`);
+    const objectRef = storageRef(storage, assetUrl);
+    if (!objectRef.fullPath.startsWith(`users/${uid}/`)) return false;
+    await deleteObject(objectRef);
+    return true;
+  } catch (e) {
+    console.warn('[Storage] could not delete generated image', e);
+    return false;
+  }
 }

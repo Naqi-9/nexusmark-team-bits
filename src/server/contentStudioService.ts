@@ -6,8 +6,11 @@ import {
   DEFAULT_GEMMA_MODEL,
 } from './geminiService.ts';
 import { safeJsonParse } from './jsonUtils.ts';
+import {
+  ImageGenError, extractImageFromResponse, classifyImageError, resolveImageSize, isNanoBananaPro, inFlightKey, redactSecrets,
+} from './imageResult.ts';
 import { buildSchedule, type PlanSlot } from '../lib/contentPlanner.ts';
-import { findUnsupportedClaims } from '../lib/claimLint.ts';
+import { findUnsupportedClaims, findCliches } from '../lib/claimLint.ts';
 import {
   cap, sanitizeBrandContext, toPayload, normalizeHashtags, BriefSchema,
   GenerateRequestSchema, RegenerateSectionSchema, CalendarRequestSchema, RegenerateEntrySchema, ImageRequestSchema,
@@ -26,6 +29,8 @@ import {
 // Limits & helpers
 // -------------------------------------------------------------
 const GENERATION_TIMEOUT_MS = 90_000;
+// Pro image generation uses always-on thinking and can take well over a minute at 2K/4K.
+const IMAGE_TIMEOUT_MS = 150_000;
 
 function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -64,8 +69,25 @@ const FACT_RULES = `FACTUAL RULES (strict):
 - Audience sizes and any estimate must be labelled as an estimate/assumption and listed in "assumptions".
 - Do not claim posting times are proven optimal.`;
 
+const WRITING_RULES = `CRAFT RULES (you are an experienced human creative strategist and copywriter, not a template):
+Before writing, silently work out: what exactly is sold, who buys it and why, their main objection, the single objective of this piece, and what this platform's readers expect. Then choose ONE specific creative angle for each variation. Variations must differ in angle, not just wording.
+- Use concrete details that appear in <brand_context> (real product names, real services, real audience pain points). If the context lacks a detail, write around it. Never fill the gap with an invented one.
+- The hook must be specific to this audience and product. No generic openers, no rhetorical "Are you ready to...?" questions, no "In today's fast-paced world".
+- Plain, natural, concise language. Vary sentence length and structure. Every sentence must earn its place. One clear call to action, stated once.
+- Adapt hard to the platform: LinkedIn = credible and insight-led; Instagram = visual-first, short caption; X = tight and punchy; Facebook = conversational; Paid ads = benefit-led and within typical ad length; Email = a specific subject line and a scannable body.
+- The brand's industry decides the creative approach. A dairy brand, a clothing store, a dental clinic and a SaaS tool must read and look completely different. Do not reuse one template.
+- BANNED: "unlock your potential", "take your brand to the next level", "revolutionize", "game-changer", "elevate your", "in today's fast-paced world", "journey" used as a metaphor, "seamless", "cutting-edge", "dive in", "supercharge", "look no further", "don't miss out", fake urgency or scarcity, unsupported superlatives ("best", "#1", "leading") and obvious AI phrasing.
+- Emojis: none unless the brand voice clearly uses them; never more than 2. Hashtags: 3 to 6 relevant ones on platforms that use them, none on LinkedIn unless natural, none in email or ads. No keyword stuffing.
+- The caption, hook, text overlay and image must read as ONE campaign built on the same idea.`;
+
+const IMAGE_PROMPT_RULES = `IMAGE PROMPT RULES (field "imagePrompt", always written in English even if the copy is not):
+Write 70 to 140 words of art direction for a photorealistic commercial image, in this order: the exact subject and what it is doing; shot type, camera angle and lens feel; lighting (direction, softness, time of day); environment and surfaces; composition and where the subject sits so there is clean negative space for a headline; colour palette taken from the brand colours; mood. Choose the visual genre that fits the real business (product photography, food and beverage, editorial fashion, lifestyle, clean tech visual, professional service portrait, minimal branded composition).
+- Describe only products, packaging and people that the brand context supports. Never invent a different product, label, logo or brand mark; say "unbranded" where packaging detail is unknown.
+- The image must contain NO text, letters, numbers, logos or watermarks (text is added separately).
+- Ask for natural, believable results: real materials and textures, accurate proportions, one clear focal subject, an uncluttered background. Avoid floating objects, plastic sheen, glow effects, generic stock-photo setups, and close-ups of hands or faces unless essential.`;
+
 const FIELD_SPEC = `Return ONLY raw JSON (no markdown fences) with these keys:
-title, objective, audienceEstimate (label as estimate), creativeConcept, hook, caption, cta, hashtags (array of strings), visualDirection, textOverlay (short on-image text), imagePrompt (a prompt for an image generator), creativeBrief {composition, colors (hex list from the brand colors), typography, imagery, textOverlay, logoPlacement}, assumptions (array: every estimate/assumption you made).
+title, objective, audienceEstimate (label as estimate), creativeConcept, hook, caption, cta, hashtags (array of strings), visualDirection, textOverlay (short on-image text), imagePrompt (follow IMAGE PROMPT RULES), creativeBrief {composition, colors (hex list from the brand colors), typography, imagery, textOverlay, logoPlacement}, assumptions (array: every estimate/assumption you made).
 Add when relevant: carouselSlides [{heading, body}] for carousels; reelScript [{scene, voiceover, onScreen}] for reels; emailSubject for emails; adHeadline and adDescription for ads.`;
 
 function assertFormatAllowed(platform: Platform, format: ContentFormat) {
@@ -79,7 +101,7 @@ function lintVariation(p: ContentPayload, contextJson: string): string[] {
     ...(p.carouselSlides || []).flatMap(x => [x.heading, x.body]),
     ...(p.reelScript || []).flatMap(x => [x.voiceover, x.onScreen])]
     .filter(Boolean).join('\n');
-  return findUnsupportedClaims(text, contextJson);
+  return [...findUnsupportedClaims(text, contextJson), ...findCliches(text)];
 }
 
 // -------------------------------------------------------------
@@ -93,6 +115,8 @@ export async function generateContentVariations(rawContext: unknown, req: Genera
   const prompt = `You are Google Gemma 4 working as a senior social media & performance copywriter.
 ${UNTRUSTED_NOTICE}
 ${FACT_RULES}
+${WRITING_RULES}
+${IMAGE_PROMPT_RULES}
 
 <brand_context>
 ${contextJson}
@@ -190,6 +214,8 @@ async function generateSlots(contextJson: string, slots: PlanSlot[], req: Pick<C
 ${UNTRUSTED_NOTICE}
 ${FACT_RULES}
 - Do not invent holidays or events. Only reference seasonal events the user listed.
+${WRITING_RULES}
+${IMAGE_PROMPT_RULES}
 
 <brand_context>
 ${contextJson}
@@ -274,36 +300,63 @@ export async function regenerateCalendarEntry(rawContext: unknown, input: z.infe
 
 // -------------------------------------------------------------
 // 4. Real image generation (ONLY when IMAGE_GENERATION_MODEL is configured)
+//    Intended model: Nano Banana Pro = Gemini 3 Pro Image, stable id "gemini-3-pro-image".
+//    The model id is configuration. It is never swapped for another model automatically.
 // -------------------------------------------------------------
 export function imageGenerationStatus() {
-  const model = process.env.IMAGE_GENERATION_MODEL || '';
-  return { configured: Boolean(model && process.env.GEMINI_API_KEY), model: model || null, availability: model && process.env.GEMINI_API_KEY ? 'configured_not_verified' : 'not_configured' };
+  const model = (process.env.IMAGE_GENERATION_MODEL || '').trim();
+  const configured = Boolean(model && process.env.GEMINI_API_KEY);
+  return {
+    configured,
+    model: model || null,
+    availability: configured ? 'configured_not_verified' : 'not_configured',
+    // Google lists the Pro image model as paid-only. Shown to the user so the cost is never a surprise.
+    paidOnly: isNanoBananaPro(model),
+  };
 }
 
-export async function generateBrandImage(input: z.infer<typeof ImageRequestSchema>) {
+const inFlightImages = new Set<string>();
+
+export async function generateBrandImage(
+  input: z.infer<typeof ImageRequestSchema>,
+  who: { uid: string; workspaceId: string } = { uid: 'anon', workspaceId: '' }
+) {
   const status = imageGenerationStatus();
   if (!status.configured || !status.model) {
-    throw new StrategistError('not_configured', 'No image generation model is configured (set IMAGE_GENERATION_MODEL).', 501);
+    throw new StrategistError('not_configured', 'No image generation model is configured (set IMAGE_GENERATION_MODEL on the server).', 501);
   }
   const model = status.model;
+  const key = inFlightKey(who.uid, who.workspaceId, input.prompt, input.aspectRatio);
+  if (inFlightImages.has(key)) {
+    throw new StrategistError('generation_failed', 'An identical image request is already running. Please wait for it to finish.', 409);
+  }
+  inFlightImages.add(key);
   try {
     if (/^imagen/i.test(model)) {
-      throw new StrategistError('unsupported_model', 'Imagen models have been retired from the Gemini API. Configure a supported Gemini image model such as gemini-3.1-flash-image.', 400);
+      throw new ImageGenError('unsupported_model', 'Imagen models have been retired from the Gemini API. Configure a Gemini image model such as gemini-3-pro-image (Nano Banana Pro).', 400);
     }
+    const imageSize = resolveImageSize(model, process.env.IMAGE_GENERATION_SIZE);
     const res: any = await withTimeout(
       ai.models.generateContent({
         model,
-        contents: [{ role: 'user', parts: [{ text: `${input.prompt}\n\nAspect ratio ${input.aspectRatio}.` }] }],
-        config: { responseModalities: ['IMAGE', 'TEXT'] } as any,
+        contents: [{ role: 'user', parts: [{ text: input.prompt }] }],
+        config: {
+          responseModalities: ['TEXT', 'IMAGE'],
+          imageConfig: { aspectRatio: input.aspectRatio, ...(imageSize ? { imageSize } : {}) },
+        } as any,
       }),
-      GENERATION_TIMEOUT_MS
+      IMAGE_TIMEOUT_MS
     );
-    const part = res?.candidates?.[0]?.content?.parts?.find((p: any) => p?.inlineData?.data);
-    if (!part) throw new StrategistError('empty_response', 'The configured model returned no image. Verify that IMAGE_GENERATION_MODEL names an enabled image-generation model.', 502);
-    return { imageBase64: part.inlineData.data as string, mimeType: (part.inlineData.mimeType as string) || 'image/png', modelUsed: model };
+    const { imageBase64, mimeType } = extractImageFromResponse(res);
+    return { imageBase64, mimeType, modelUsed: model, imageSize: imageSize || undefined };
   } catch (err: any) {
     if (err instanceof StrategistError) throw err;
-    throw classifyGenerationError(err);
+    const e = classifyImageError(err, model);
+    // Log a redacted summary server-side; the client only ever receives the fixed message.
+    console.error(`[Content] image generation failed (${e.code}):`, redactSecrets(String(err?.message || err)).slice(0, 500));
+    throw new StrategistError(e.code, e.message, e.status);
+  } finally {
+    inFlightImages.delete(key);
   }
 }
 

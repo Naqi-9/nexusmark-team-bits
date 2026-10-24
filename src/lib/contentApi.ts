@@ -28,7 +28,7 @@ export const contentApi = {
   capabilities: async () => {
     const res = await authenticatedFetch('/api/content/capabilities');
     if (!res.ok) throw new ApiError('Could not load capabilities.');
-    return (await res.json()) as { textModel: string; textConfigured: boolean; image: { configured: boolean; model: string | null } };
+    return (await res.json()) as { textModel: string; textConfigured: boolean; image: { configured: boolean; model: string | null; paidOnly?: boolean } };
   },
   generate: (context: unknown, request: GenerateParams) =>
     post<{ variations: ContentPayload[]; warnings: string[][]; modelUsed: string }>('/api/content/generate', { context, request }),

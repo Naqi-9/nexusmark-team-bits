@@ -67,7 +67,7 @@ export function ContentStudio({ workspace, brandProfile, products, userId, seedI
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
-  const [imageCap, setImageCap] = useState<{ configured: boolean; model: string | null } | null>(null);
+  const [imageCap, setImageCap] = useState<{ configured: boolean; model: string | null; paidOnly?: boolean } | null>(null);
   const [textModel, setTextModel] = useState<{ model: string; configured: boolean } | null>(null);
   const inFlight = useRef(false);
   const saveInFlight = useRef(false);
