@@ -1,0 +1,6 @@
+{
+  "name": "NexusMark - AI Marketing Platform",
+  "description": "Scan any business website, extract brand identity and SEO insights, and create an intelligent marketing workspace powered by AI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

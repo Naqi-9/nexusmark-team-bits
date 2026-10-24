@@ -1,0 +1,515 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "photoURL": {
+          "type": "string",
+          "maxLength": 1024
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "uid",
+        "email"
+      ]
+    },
+    "Workspace": {
+      "title": "Workspace",
+      "description": "Marketing workspace owned by a user",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "websiteUrl": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "active",
+            "archived"
+          ]
+        },
+        "latestScanId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "logoUrl": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "websiteScreenshotUrl": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "mobileScreenshotUrl": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "ogImageUrl": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "screenshotStatus": {
+          "type": "string",
+          "enum": [
+            "captured",
+            "preview_image",
+            "unavailable"
+          ]
+        },
+        "screenshotCapturedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "screenshotUrl": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "ownerId",
+        "name",
+        "websiteUrl",
+        "status"
+      ]
+    },
+    "WebsiteScan": {
+      "title": "WebsiteScan",
+      "description": "Historical or active website scan record",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "workspaceId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "sourceUrl": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "queued",
+            "crawling",
+            "analyzing",
+            "completed",
+            "failed"
+          ]
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "completedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "ownerId",
+        "sourceUrl",
+        "status"
+      ]
+    },
+    "BrandProfile": {
+      "title": "BrandProfile",
+      "description": "Extracted and AI-analyzed brand DNA for a workspace",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "workspaceId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "businessName": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "businessDescription": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "industry": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "industrySubcategory": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "logoUrl": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "websiteScreenshotUrl": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "mobileScreenshotUrl": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "ogImageUrl": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "screenshotStatus": {
+          "type": "string",
+          "enum": [
+            "captured",
+            "preview_image",
+            "unavailable"
+          ]
+        },
+        "screenshotCapturedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "screenshotUrl": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "businessType": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "ownerId",
+        "workspaceId",
+        "businessName"
+      ]
+    },
+    "SeoAudit": {
+      "title": "SeoAudit",
+      "description": "Technical and content SEO audit findings",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "workspaceId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "affectedUrl": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "auditedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "ownerId",
+        "workspaceId",
+        "affectedUrl"
+      ]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Detected product or service offering from website crawl",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "workspaceId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 4096
+        },
+        "price": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "currency": {
+          "type": "string",
+          "maxLength": 16
+        },
+        "imageUrl": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "productUrl": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "category": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "availability": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "detectedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "ownerId",
+        "workspaceId",
+        "name"
+      ]
+    },
+    "ActivityLog": {
+      "title": "ActivityLog",
+      "description": "Audit and activity log entries for workspace operations",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "workspaceId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "action": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "details": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "ownerId",
+        "workspaceId",
+        "action"
+      ]
+    },
+    "ContentItem": {
+      "title": "ContentItem",
+      "description": "Generated content (Content Studio) or scheduled calendar entry owned by a user's workspace",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "ownerId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "workspaceId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "studio",
+            "calendar"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "draft",
+            "in_review",
+            "approved",
+            "published"
+          ]
+        },
+        "content": {
+          "type": "object",
+          "description": "Structured ContentPayload (title, hook, caption, cta, hashtags, creativeBrief, ...)"
+        },
+        "aspectRatio": {
+          "type": "string",
+          "enum": [
+            "4:5",
+            "1:1",
+            "9:16"
+          ]
+        },
+        "campaign": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "planId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "pillar": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "topic": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "scheduledDate": {
+          "type": "string",
+          "description": "YYYY-MM-DD in the user's time zone"
+        },
+        "timezone": {
+          "type": "string",
+          "maxLength": 80
+        },
+        "modelUsed": {
+          "type": "string",
+          "description": "Optional. Present only when a real model produced the text"
+        },
+        "publishedRecordedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "imageAssetUrl": {
+          "type": "string",
+          "maxLength": 2048
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "ownerId",
+        "workspaceId",
+        "kind",
+        "status",
+        "content",
+        "aspectRatio",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User account documents mapped by UID"
+    },
+    "/workspaces/{workspaceId}": {
+      "schema": "Workspace",
+      "description": "Workspaces mapped by workspace ID"
+    },
+    "/websiteScans/{scanId}": {
+      "schema": "WebsiteScan",
+      "description": "Website scans mapped by scan ID"
+    },
+    "/brandProfiles/{profileId}": {
+      "schema": "BrandProfile",
+      "description": "Brand profiles mapped by profile ID"
+    },
+    "/seoAudits/{auditId}": {
+      "schema": "SeoAudit",
+      "description": "SEO audit reports mapped by audit ID"
+    },
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Products detected mapped by product ID"
+    },
+    "/activityLogs/{logId}": {
+      "schema": "ActivityLog",
+      "description": "Activity logs mapped by log ID"
+    }
+  }
+}
