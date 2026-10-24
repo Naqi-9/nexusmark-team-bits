@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Sparkles, Loader2, Copy, Check, Save, Wand2, BookOpen } from 'lucide-react';
+import { Sparkles, Loader2, Copy, Check, Save, Wand2, BookOpen, CalendarDays, X } from 'lucide-react';
 import type { BrandProfileRecord, ProductRecord, WorkspaceRecord } from '../../services/workspaceService.ts';
 import { buildBrandContext, brandPalette, suggestedAudience, suggestedTone } from '../../lib/brandContext.ts';
 import { contentApi } from '../../lib/contentApi.ts';
@@ -9,8 +9,10 @@ import {
   type ContentStatus, type Platform,
 } from '../../lib/contentTypes.ts';
 import {
-  buildContentItem, createContentItem, updateContentItem, newContentId, browserTimeZone,
+  buildContentItem, createContentItem, updateContentItem, newContentId, browserTimeZone, fetchContentItems,
 } from '../../services/contentService.ts';
+import { sortCalendarForMagic } from '../../lib/magicDesign.ts';
+import { todayInTimeZone } from '../../lib/contentPlanner.ts';
 import { ContentEditor } from './ContentEditor.tsx';
 import { CreativePreview } from './CreativePreview.tsx';
 import { Field, Notice, StatusBadge, inputCls, primaryBtn, ghostBtn } from './ui.tsx';
@@ -37,10 +39,12 @@ interface Props {
   userId: string;
   seedItem: ContentItemRecord | null;
   onSeedConsumed: () => void;
+  /** True when the item was opened with "Magic design" from the calendar: design it immediately. */
+  seedMagic?: boolean;
   onOpenLibrary: () => void;
 }
 
-export function ContentStudio({ workspace, brandProfile, products, userId, seedItem, onSeedConsumed, onOpenLibrary }: Props) {
+export function ContentStudio({ workspace, brandProfile, products, userId, seedItem, onSeedConsumed, seedMagic = false, onOpenLibrary }: Props) {
   const context = useMemo(() => buildBrandContext(workspace, brandProfile, products), [workspace, brandProfile, products]);
 
   const [platform, setPlatform] = useState<Platform>('instagram');
@@ -68,22 +72,57 @@ export function ContentStudio({ workspace, brandProfile, products, userId, seedI
   const inFlight = useRef(false);
   const saveInFlight = useRef(false);
 
+  // Magic Design (AI designs the post for a calendar entry)
+  const [magicOpen, setMagicOpen] = useState(false);
+  const [magicItems, setMagicItems] = useState<ContentItemRecord[] | null>(null);
+  const [magicLoading, setMagicLoading] = useState(false);
+  const [magicError, setMagicError] = useState<string | null>(null);
+  const [magicToken, setMagicToken] = useState(0);
+  const magicAutoSave = useRef(false);
+
   // Real capabilities from the server (never assumed).
   useEffect(() => {
     contentApi.capabilities().then(c => { setImageCap(c.image); setTextModel({ model: c.textModel, configured: c.textConfigured }); }).catch(() => setImageCap({ configured: false, model: null }));
   }, []);
 
+  const openItem = (item: ContentItemRecord, tabToShow: 'edit' | 'preview' = 'edit') => {
+    setDrafts([{
+      key: item.id, content: item.content, aspectRatio: item.aspectRatio, status: item.status,
+      campaign: item.campaign || '', warnings: [], modelUsed: item.modelUsed, imageAssetUrl: item.imageAssetUrl, saved: true, dirty: false,
+      publishedRecordedAt: item.publishedRecordedAt, base: item,
+    }]);
+    setActive(0); setTab(tabToShow); setError(null); setSaveMsg(null);
+  };
+
   // Open a saved item (from Library / Calendar).
   useEffect(() => {
     if (!seedItem) return;
-    setDrafts([{
-      key: seedItem.id, content: seedItem.content, aspectRatio: seedItem.aspectRatio, status: seedItem.status,
-      campaign: seedItem.campaign || '', warnings: [], modelUsed: seedItem.modelUsed, imageAssetUrl: seedItem.imageAssetUrl, saved: true, dirty: false,
-      publishedRecordedAt: seedItem.publishedRecordedAt, base: seedItem,
-    }]);
-    setActive(0); setTab('edit'); setError(null); setSaveMsg(null);
+    if (seedMagic) { startMagic(seedItem); } else { openItem(seedItem); }
     onSeedConsumed();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seedItem, onSeedConsumed]);
+
+  /** Opens the calendar entry on the design view and asks the AI to design the post right away. */
+  function startMagic(item: ContentItemRecord) {
+    openItem(item, 'preview');
+    magicAutoSave.current = true;
+    setMagicOpen(false);
+    setMagicToken(t => t + 1);
+  }
+
+  const toggleMagicPanel = async () => {
+    const next = !magicOpen;
+    setMagicOpen(next);
+    if (!next || magicItems) return;
+    setMagicLoading(true); setMagicError(null);
+    try {
+      const all = await fetchContentItems(workspace.id);
+      setMagicItems(sortCalendarForMagic(all, todayInTimeZone(browserTimeZone() || undefined)));
+    } catch (e) {
+      console.error('[Studio] magic list failed', e);
+      setMagicError('Could not load your calendar entries. Please retry.');
+    } finally { setMagicLoading(false); }
+  };
 
   const draft = drafts[active];
   const formats = FORMATS_BY_PLATFORM[platform];
@@ -147,6 +186,16 @@ export function ContentStudio({ workspace, brandProfile, products, userId, seedI
     }
   };
 
+  // After Magic Design stored the new picture, save the calendar entry so the design is attached to it.
+  useEffect(() => {
+    const d = drafts[active];
+    if (magicAutoSave.current && d && d.saved && d.dirty && d.imageAssetUrl && !saving) {
+      magicAutoSave.current = false;
+      void save();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drafts, active, saving]);
+
   const recordPublished = async () => {
     if (!window.confirm('Only mark this as Published if you have actually posted it yourself. NexusMark does not publish to social accounts. Continue?')) return;
     await save({ status: 'published', publishedRecordedAt: new Date().toISOString() });
@@ -180,9 +229,51 @@ export function ContentStudio({ workspace, brandProfile, products, userId, seedI
               {textModel.configured ? `Gemma 4 · ${textModel.model}` : 'Gemma 4 key not configured'}
             </span>
           )}
+          <button className={primaryBtn} onClick={toggleMagicPanel} aria-expanded={magicOpen}>
+            <Wand2 className="w-4 h-4" /> Magic Design
+          </button>
           <button className={ghostBtn} onClick={onOpenLibrary}><BookOpen className="w-3.5 h-3.5" /> Library</button>
         </div>
       </div>
+
+      {/* Magic Design: pick a calendar entry and the AI designs the post */}
+      {magicOpen && (
+        <section aria-label="Magic Design" className="bg-white border border-[#f1d4d3] rounded-2xl p-5 sm:p-6 shadow-sm space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-bold text-black flex items-center gap-2"><Wand2 className="w-4 h-4 text-[#81171B]" /> Magic Design from your calendar</h3>
+              <p className="text-xs text-gray-600 mt-1">
+                Choose a calendar entry. The AI reads its concept, visual direction and brand colors, creates the picture, then adds the headline, brand name and logo for you.
+              </p>
+            </div>
+            <button aria-label="Close Magic Design" className={ghostBtn} onClick={() => setMagicOpen(false)}><X className="w-4 h-4" /></button>
+          </div>
+          {imageCap && !imageCap.configured && (
+            <Notice tone="warn">No image model is configured on the server (IMAGE_GENERATION_MODEL), so Magic Design can only prepare the branded card for now. Ask your admin to enable an image model for full AI pictures.</Notice>
+          )}
+          {magicLoading && <div className="flex items-center gap-2 text-sm text-gray-500"><Loader2 className="w-4 h-4 animate-spin" /> Loading calendar entries…</div>}
+          {magicError && <Notice tone="error">{magicError}</Notice>}
+          {magicItems && magicItems.length === 0 && (
+            <Notice tone="info">Your Content Calendar is empty. Ask the AI Strategist to build a content calendar, and it will appear here automatically.</Notice>
+          )}
+          {magicItems && magicItems.length > 0 && (
+            <ul className="divide-y divide-gray-100 border border-gray-200 rounded-xl max-h-80 overflow-y-auto">
+              {magicItems.slice(0, 40).map(it => (
+                <li key={it.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                  <div className="min-w-0">
+                    <div className="text-[11px] text-gray-500 flex items-center gap-1.5">
+                      <CalendarDays className="w-3 h-3" /> {it.scheduledDate} · {PLATFORM_LABELS[it.content.platform]}
+                      {it.imageAssetUrl && <span className="px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 font-semibold">Designed</span>}
+                    </div>
+                    <div className="text-sm font-semibold text-black truncate">{it.topic || it.content.title}</div>
+                  </div>
+                  <button className={ghostBtn} onClick={() => startMagic(it)}><Wand2 className="w-3.5 h-3.5" /> {it.imageAssetUrl ? 'Redesign' : 'Design'}</button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
 
       {/* Generator */}
       <section aria-label="Generate content" className="bg-white border border-gray-200 rounded-2xl p-5 sm:p-6 shadow-sm space-y-5">
@@ -299,6 +390,10 @@ export function ContentStudio({ workspace, brandProfile, products, userId, seedI
               />
             ) : (
               <CreativePreview
+                key={draft.key}
+                magicToken={magicToken}
+                onMagicConsumed={() => { setMagicToken(0); if (!imageCap?.configured) magicAutoSave.current = false; }}
+                savedImageUrl={draft.imageAssetUrl}
                 workspaceId={workspace.id}
                 onImageAssetSaved={url => updateDraft(active, d => ({ ...d, imageAssetUrl: url, dirty: true }))}
                 content={draft.content}

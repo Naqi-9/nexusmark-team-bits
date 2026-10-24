@@ -15,6 +15,11 @@ import {
   RefreshCw,
   Copy,
   Check,
+  Mic,
+  MicOff,
+  Volume2,
+  VolumeX,
+  CalendarCheck,
 } from 'lucide-react';
 import {
   ChatMessageRecord,
@@ -22,17 +27,33 @@ import {
   fetchChatMessages,
   saveDeliverable,
   BrandProfileRecord,
+  ProductRecord,
   WorkspaceRecord,
 } from '../services/workspaceService.ts';
 import { BRAND_ASSETS } from '../lib/branding.ts';
 import { newChatMessageId, normalizeModelUsed } from '../lib/chatMessage.ts';
+import { AiMessage } from './AiMessage.tsx';
+import { textForSpeech } from '../lib/aiText.ts';
+import { contentApi } from '../lib/contentApi.ts';
+import { buildBrandContext, suggestedPillars, suggestedTone } from '../lib/brandContext.ts';
+import { buildContentItem, createContentItems, browserTimeZone } from '../services/contentService.ts';
+import { todayInTimeZone } from '../lib/contentPlanner.ts';
+import {
+  detectCalendarIntent, formatCalendarSummary, deliverableToCalendarEntries, CALENDAR_SYNC_MARKER, type CalendarIntent,
+} from '../lib/calendarIntent.ts';
+import { parseVoiceCommand, VOICE_LANGUAGES } from '../lib/voice.ts';
+import { useVoiceAssistant } from '../lib/useVoiceAssistant.ts';
 
 interface MarketingStrategistProps {
   workspace: WorkspaceRecord;
   brandProfile: BrandProfileRecord | null;
   userId: string;
+  products?: ProductRecord[];
   onDeliverableCreated?: () => void;
   onNavigateToDeliverables?: () => void;
+  onOpenCalendar?: () => void;
+  onOpenStudio?: () => void;
+  onOpenLibrary?: () => void;
 }
 
 const QUICK_PROMPTS = [
@@ -62,8 +83,12 @@ export function MarketingStrategist({
   workspace,
   brandProfile,
   userId,
+  products = [],
   onDeliverableCreated,
   onNavigateToDeliverables,
+  onOpenCalendar,
+  onOpenStudio,
+  onOpenLibrary,
 }: MarketingStrategistProps) {
   const [messages, setMessages] = useState<ChatMessageRecord[]>([]);
   const [inputMessage, setInputMessage] = useState('');
@@ -76,6 +101,79 @@ export function MarketingStrategist({
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [savingDeliverable, setSavingDeliverable] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [progressText, setProgressText] = useState<string | null>(null);
+  const [voiceLang, setVoiceLang] = useState<string>(() => {
+    try { return localStorage.getItem('nexusmark.voiceLang') || 'en-US'; } catch { return 'en-US'; }
+  });
+  const [speakReplies, setSpeakReplies] = useState(false);
+  const [handsFree, setHandsFree] = useState(false);
+  const speakRepliesRef = useRef(false);
+  const handsFreeRef = useRef(false);
+  speakRepliesRef.current = speakReplies || handsFree;
+  handsFreeRef.current = handsFree;
+
+  // Voice assistant (browser speech recognition + speech synthesis)
+  const navigateByVoice = (target: string): boolean => {
+    const map: Record<string, (() => void) | undefined> = {
+      content_calendar: onOpenCalendar,
+      content_studio: onOpenStudio,
+      content_library: onOpenLibrary,
+      deliverables: onNavigateToDeliverables,
+    };
+    const fn = map[target];
+    if (!fn) return false;
+    fn();
+    return true;
+  };
+
+  const voice = useVoiceAssistant({
+    lang: voiceLang,
+    onFinalTranscript: (text) => {
+      const cmd = parseVoiceCommand(text);
+      if (cmd.type === 'stop') { setHandsFree(false); voiceRef.current.cancelSpeech(); return; }
+      if (cmd.type === 'navigate' && navigateByVoice(cmd.target)) return;
+      void handleSendMessage(text);
+    },
+  });
+  const voiceRef = useRef(voice);
+  voiceRef.current = voice;
+
+  const toggleHandsFree = () => {
+    if (handsFree) {
+      setHandsFree(false);
+      voice.stop();
+      voice.cancelSpeech();
+    } else {
+      setHandsFree(true);
+      voice.start();
+    }
+  };
+  const toggleMic = () => {
+    if (voice.listening) voice.stop();
+    else voice.start();
+  };
+  const changeVoiceLang = (code: string) => {
+    setVoiceLang(code);
+    try { localStorage.setItem('nexusmark.voiceLang', code); } catch { /* storage unavailable */ }
+    voice.stop();
+  };
+
+  // Hands-free keeps the conversation going: after silence or a spoken reply, listen again.
+  useEffect(() => {
+    if (!handsFree) return;
+    if (voice.error) { setHandsFree(false); return; }
+    if (voice.listening || voice.speaking || isLoading) return;
+    const t = setTimeout(() => voiceRef.current.start(), 700);
+    return () => clearTimeout(t);
+  }, [handsFree, voice.listening, voice.speaking, voice.error, isLoading]);
+
+  /** Speaks a finished reply and, in hands-free mode, listens again afterwards. */
+  const speakReply = (text: string) => {
+    if (!speakRepliesRef.current) return;
+    voiceRef.current.speak(textForSpeech(text), () => {
+      if (handsFreeRef.current) voiceRef.current.start();
+    });
+  };
 
   const modelBadge = brandProfile?.modelAttribution?.modelUsed || 'model attribution unavailable';
   const isMultimodal = Boolean(brandProfile?.modelAttribution?.isMultimodal);
@@ -96,7 +194,7 @@ export function MarketingStrategist({
               ownerId: userId,
               workspaceId: workspace.id,
               role: 'assistant',
-              content: `Hello! I am your Marketing Strategist. Model attribution will be shown after an AI response is generated.\n\nI have reviewed the brand data for **${brandProfile?.businessName || workspace.name}**${isMultimodal ? ' including your website screenshot and visual identity' : ''}.\n\nHow can I help you grow today? Choose a strategic prompt below or ask any marketing question.`,
+              content: `Hello! I am your AI Marketing Strategist for ${brandProfile?.businessName || workspace.name}${isMultimodal ? ', and I have reviewed your website screenshot and visual identity' : ''}.\n\nWHAT I CAN DO\n- Build a content calendar and add it to your Content Calendar automatically\n- Plan ad angles, SEO fixes and brand messaging\n- Talk with you by voice: press the microphone, or switch on Hands-free\n\nChoose a prompt below or ask any marketing question.`,
               suggestedActions: [
                 'Build a 7-day multi-channel content calendar',
                 'Audit visual aesthetic vs headline messaging',
@@ -144,6 +242,89 @@ export function MarketingStrategist({
     },
   });
 
+  /** Adds an assistant message to the screen and saves it. A save failure only shows a warning. */
+  const addAssistantMessage = async (content: string, modelUsedRaw: unknown, suggested?: string[]) => {
+    const modelUsed = normalizeModelUsed(modelUsedRaw);
+    const assistantMsg: ChatMessageRecord = {
+      id: newChatMessageId(),
+      ownerId: userId,
+      workspaceId: workspace.id,
+      role: 'assistant',
+      content,
+      ...(modelUsed ? { modelUsed } : {}),
+      ...(suggested && suggested.length ? { suggestedActions: suggested } : {}),
+      createdAt: new Date().toISOString(),
+    };
+    setMessages(prev => [...prev, assistantMsg]);
+    try {
+      await saveChatMessage({
+        id: assistantMsg.id,
+        userId,
+        workspaceId: workspace.id,
+        role: 'assistant',
+        content: assistantMsg.content,
+        modelUsed: assistantMsg.modelUsed,
+        suggestedActions: assistantMsg.suggestedActions,
+        createdAt: assistantMsg.createdAt,
+      });
+    } catch (err) {
+      console.warn('[Strategist] Could not save assistant message:', err);
+      setSaveWarning('The response could not be saved to chat history, but you can still read and copy it.');
+    }
+    speakReply(content);
+  };
+
+  const CALENDAR_FOLLOW_UPS = [
+    'Create high-converting ad copy angles',
+    'Draft an on-page SEO action plan',
+    'Audit visual aesthetic vs headline messaging',
+  ];
+
+  /** Generates a structured calendar and writes it to the Content Calendar. Ids derive from the user message, so a retry cannot duplicate. */
+  const runCalendarSync = async (userMsg: ChatMessageRecord, intent: CalendarIntent) => {
+    const tz = browserTimeZone();
+    const startDate = todayInTimeZone(tz || undefined);
+    setProgressText(`Writing your ${intent.days}-day calendar and adding it to Content Calendar...`);
+    const context = buildBrandContext(workspace, brandProfile, products);
+    const res = await contentApi.calendar(context, {
+      startDate,
+      days: intent.days,
+      platforms: intent.platforms,
+      postsPerWeek: intent.postsPerWeek,
+      objective: 'engagement',
+      pillars: suggestedPillars(brandProfile),
+      themes: userMsg.content.slice(0, 500),
+      seasonalEvents: '',
+      tone: suggestedTone(brandProfile),
+      language: 'English',
+      timezone: tz,
+    });
+    const planId = `plan_${userMsg.id}`;
+    const recs = res.entries.map(e => buildContentItem({
+      id: `${planId}_${e.slot.index}`,
+      userId,
+      workspaceId: workspace.id,
+      kind: 'calendar',
+      content: e.content,
+      aspectRatio: e.content.format === 'reel' ? '9:16' : e.content.platform === 'instagram' ? '4:5' : '1:1',
+      status: 'draft',
+      planId,
+      pillar: e.slot.pillar,
+      topic: e.topic,
+      scheduledDate: e.slot.date,
+      timezone: tz,
+      modelUsed: e.modelUsed,
+    }));
+    setProgressText('Saving to your Content Calendar...');
+    await createContentItems(recs);
+    const summary = formatCalendarSummary({
+      days: intent.days,
+      entries: res.entries,
+      failedDates: res.failedSlots.map(f => f.date),
+    });
+    await addAssistantMessage(summary, res.entries[0]?.modelUsed, CALENDAR_FOLLOW_UPS);
+  };
+
   /**
    * Runs one chat turn. `existingUserMsg` is set when retrying a failed turn: the user
    * message is already on screen and keeps its id, so Firestore overwrites rather than duplicates.
@@ -155,6 +336,7 @@ export function MarketingStrategist({
     setSaveWarning(null);
     setFailedTurn(null);
     setIsLoading(true);
+    setProgressText(null);
 
     const priorMessages = isRetry ? messages.filter(m => m.id !== userMsg.id) : messages;
     if (!isRetry) setMessages(prev => [...prev, userMsg]);
@@ -174,7 +356,23 @@ export function MarketingStrategist({
       setSaveWarning('Your message could not be saved to chat history. The conversation will continue.');
     }
 
-    // 2. Ask Gemma 4 (server side).
+    // 2. A request for a content calendar is built as real calendar entries and synced automatically.
+    const calendarIntent = detectCalendarIntent(userMsg.content);
+    if (calendarIntent) {
+      try {
+        await runCalendarSync(userMsg, calendarIntent);
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : 'The calendar could not be created. Please retry.');
+        setFailedTurn(userMsg);
+      } finally {
+        inFlightRef.current = false;
+        setIsLoading(false);
+        setProgressText(null);
+      }
+      return;
+    }
+
+    // 3. Everything else: ask Gemma 4 (server side).
     try {
       const response = await authenticatedFetch('/api/chat', {
         method: 'POST',
@@ -197,39 +395,11 @@ export function MarketingStrategist({
         throw new Error('The AI Strategist returned an empty response. Please retry.');
       }
 
-      // Only attribute a model if the server reported a real one.
-      const modelUsed = normalizeModelUsed(data.modelUsed);
-      const assistantMsg: ChatMessageRecord = {
-        id: newChatMessageId(),
-        ownerId: userId,
-        workspaceId: workspace.id,
-        role: 'assistant',
-        content: data.reply,
-        ...(modelUsed ? { modelUsed } : {}),
-        ...(Array.isArray(data.suggestedNextActions) && data.suggestedNextActions.length
-          ? { suggestedActions: data.suggestedNextActions as string[] }
-          : {}),
-        createdAt: new Date().toISOString(),
-      };
-
-      setMessages(prev => [...prev, assistantMsg]);
-
-      // 3. Persist the assistant message. Failure here only shows a warning.
-      try {
-        await saveChatMessage({
-          id: assistantMsg.id,
-          userId,
-          workspaceId: workspace.id,
-          role: 'assistant',
-          content: assistantMsg.content,
-          modelUsed: assistantMsg.modelUsed,
-          suggestedActions: assistantMsg.suggestedActions,
-          createdAt: assistantMsg.createdAt,
-        });
-      } catch (err) {
-        console.warn('[Strategist] Could not save assistant message:', err);
-        setSaveWarning('The response could not be saved to chat history, but you can still read and copy it.');
-      }
+      await addAssistantMessage(
+        data.reply,
+        data.modelUsed,
+        Array.isArray(data.suggestedNextActions) ? (data.suggestedNextActions as string[]) : undefined
+      );
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Strategist chat failed.');
       setFailedTurn(userMsg);
@@ -308,6 +478,24 @@ export function MarketingStrategist({
         content: result.deliverable,
         modelUsed: result.modelUsed || modelBadge,
       });
+
+      if (type === 'content_calendar') {
+        // Auto-sync: the same plan also lands in the Content Calendar section.
+        const tz = browserTimeZone();
+        const { entries, skipped } = deliverableToCalendarEntries(result.deliverable, todayInTimeZone(tz || undefined));
+        if (entries.length > 0) {
+          const planId = `plan_deliv_${Date.now()}`;
+          await createContentItems(entries.map(e => buildContentItem({
+            id: `${planId}_${e.index}`, userId, workspaceId: workspace.id, kind: 'calendar', content: e.content,
+            aspectRatio: e.content.platform === 'instagram' ? '4:5' : '1:1', status: 'draft', planId, pillar: e.pillar,
+            topic: e.topic, scheduledDate: e.date, timezone: tz, modelUsed: result.modelUsed,
+          })));
+          const note = `Your content calendar was saved to Deliverables and ${entries.length} post${entries.length === 1 ? ' was' : 's were'} added to your Content Calendar automatically${skipped ? `. ${skipped} post${skipped === 1 ? '' : 's'} on channels the calendar does not support (such as blog or TikTok) stayed in Deliverables only` : ''}.\n\n${CALENDAR_SYNC_MARKER}: ${entries.length} post${entries.length === 1 ? '' : 's'}.`;
+          await addAssistantMessage(note, result.modelUsed);
+          if (onDeliverableCreated) onDeliverableCreated();
+          return;
+        }
+      }
 
       if (onDeliverableCreated) onDeliverableCreated();
       if (onNavigateToDeliverables) onNavigateToDeliverables();
@@ -405,6 +593,54 @@ export function MarketingStrategist({
         </div>
       </div>
 
+      {/* Voice assistant bar */}
+      <div className="px-6 py-2.5 bg-white border-b border-gray-200 flex items-center justify-between flex-wrap gap-2 text-xs">
+        <span className="font-semibold text-gray-700 flex items-center gap-1.5">
+          <Mic className="w-3.5 h-3.5 text-[#81171B]" />
+          Voice assistant
+        </span>
+        {voice.supported ? (
+          <div className="flex items-center flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={toggleHandsFree}
+              aria-pressed={handsFree}
+              className={`px-2.5 py-1 rounded border font-medium inline-flex items-center gap-1 transition-colors ${handsFree ? 'bg-[#81171B] text-white border-[#81171B]' : 'bg-white text-gray-800 border-gray-200 hover:border-[#81171B] hover:text-[#81171B]'}`}
+            >
+              <Mic className="w-3 h-3" />
+              {handsFree ? 'Hands-free on' : 'Hands-free'}
+            </button>
+            <button
+              type="button"
+              onClick={() => { if (speakReplies) voice.cancelSpeech(); setSpeakReplies(v => !v); }}
+              aria-pressed={speakReplies || handsFree}
+              disabled={handsFree || !voice.ttsSupported}
+              className={`px-2.5 py-1 rounded border font-medium inline-flex items-center gap-1 transition-colors disabled:opacity-60 ${(speakReplies || handsFree) ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-800 border-gray-200 hover:border-[#81171B] hover:text-[#81171B]'}`}
+            >
+              {(speakReplies || handsFree) ? <Volume2 className="w-3 h-3" /> : <VolumeX className="w-3 h-3" />}
+              Read replies aloud
+            </button>
+            <label className="sr-only" htmlFor="voice-lang">Voice language</label>
+            <select
+              id="voice-lang"
+              value={voiceLang}
+              onChange={(e) => changeVoiceLang(e.target.value)}
+              className="px-2 py-1 rounded border border-gray-200 bg-white text-gray-800 font-medium"
+            >
+              {VOICE_LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.label}</option>)}
+            </select>
+          </div>
+        ) : (
+          <span className="text-gray-500">Voice input needs Chrome, Edge or Safari.</span>
+        )}
+      </div>
+      {voice.error && (
+        <div role="alert" className="px-6 py-2 bg-red-50 border-b border-red-200 text-xs text-red-700 font-medium flex items-center justify-between gap-3">
+          <span>{voice.error}</span>
+          <button onClick={voice.clearError} className="underline font-semibold">Dismiss</button>
+        </div>
+      )}
+
       {/* Message Stream */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
         {messages.map(msg => (
@@ -425,7 +661,21 @@ export function MarketingStrategist({
                 ? 'bg-black text-white font-medium'
                 : 'bg-gray-50 border border-gray-200 text-gray-900 shadow-2xs'
             }`}>
-              <div className="whitespace-pre-wrap">{msg.content}</div>
+              {msg.role === 'assistant' ? (
+                <AiMessage text={msg.content} />
+              ) : (
+                <div className="whitespace-pre-wrap">{msg.content}</div>
+              )}
+
+              {msg.role === 'assistant' && msg.content.includes(CALENDAR_SYNC_MARKER) && onOpenCalendar && (
+                <button
+                  onClick={onOpenCalendar}
+                  className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#81171B] hover:bg-[#540804] text-white text-xs font-semibold transition-colors"
+                >
+                  <CalendarCheck className="w-3.5 h-3.5" />
+                  Open Content Calendar
+                </button>
+              )}
 
               {/* Suggested Follow-up Actions */}
               {msg.suggestedActions && msg.suggestedActions.length > 0 && (
@@ -489,7 +739,7 @@ export function MarketingStrategist({
             />
             <div className="bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 flex items-center space-x-2 text-xs text-gray-600 shadow-2xs">
               <Loader2 className="w-4 h-4 animate-spin text-[#81171B]" />
-              <span>Gemma 4 is synthesizing strategic recommendations...</span>
+              <span>{progressText || 'Gemma 4 is synthesizing strategic recommendations...'}</span>
             </div>
           </div>
         )}
@@ -551,11 +801,23 @@ export function MarketingStrategist({
           }}
           className="flex items-center space-x-2"
         >
+          {voice.supported && (
+            <button
+              type="button"
+              onClick={toggleMic}
+              disabled={isLoading}
+              aria-label={voice.listening ? 'Stop listening' : 'Speak your message'}
+              aria-pressed={voice.listening}
+              className={`shrink-0 w-11 h-11 rounded-xl border flex items-center justify-center transition-colors disabled:opacity-40 ${voice.listening ? 'bg-[#81171B] border-[#81171B] text-white animate-pulse' : 'bg-white border-gray-300 text-[#81171B] hover:border-[#81171B]'}`}
+            >
+              {voice.listening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+            </button>
+          )}
           <input
             type="text"
-            value={inputMessage}
+            value={voice.listening && voice.interim ? voice.interim : inputMessage}
             onChange={(e) => setInputMessage(e.target.value)}
-            placeholder={`Ask Gemma 4 anything about marketing ${brandProfile?.businessName || 'this brand'}...`}
+            placeholder={voice.listening ? 'Listening... speak now' : `Ask Gemma 4 anything about marketing ${brandProfile?.businessName || 'this brand'}...`}
             disabled={isLoading}
             className="flex-1 bg-gray-50 border border-gray-300 focus:border-[#81171B] focus:bg-white focus:outline-none rounded-xl px-4 py-3 text-sm text-black placeholder-gray-400 font-sans transition-all"
           />

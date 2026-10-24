@@ -1,4 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
+import { cleanAiText } from '../lib/aiText.ts';
 import { z } from 'zod';
 import { ExtractedWebsiteData } from './extractor.ts';
 import { safeFetch } from './ssrfValidator.ts';
@@ -502,9 +503,20 @@ RULES:
 1. Always ground advice in this specific company's positioning and products.
 2. Be direct, authoritative, actionable, and commercially sharp.
 3. Suggest concrete deliverable templates when appropriate (e.g. social posts, ad copy, headline variations).
-4. At the very end of your response, output a section:
+4. Never invent statistics, prices, testimonials or results. Label estimates as estimates.
+
+FORMAT RULES (strict, the app displays your text exactly as written):
+1. NEVER use the asterisk character (*) anywhere. No markdown bold, no italics, no markdown tables, no code fences, no emojis.
+2. Start with one short sentence that answers the question directly.
+3. Then organise the answer into sections. Write each section heading on its own line in UPPERCASE, with a blank line before it. Do not use the # symbol.
+4. For lists, put each item on its own line starting with "- ". For ordered steps use "1." "2." "3." on separate lines.
+5. Keep paragraphs to 3 sentences or fewer, with a blank line between paragraphs.
+6. When you write a social post or ad, label the parts on separate lines: Hook, Caption, Call to action, Hashtags.
+7. Finish with a short NEXT STEP section of one or two lines.
+
+At the very end of your response, output a section:
 ---SUGGESTED_ACTIONS---
-Followed by 3 brief, distinct next questions or action items the user can click, one per line.`;
+Followed by 3 brief, distinct next questions or action items the user can click, one per line (plain text, no bullets).`;
 
   const conversationContents: any[] = [
     { role: 'user', parts: [{ text: systemPrompt }] },
@@ -544,12 +556,15 @@ Followed by 3 brief, distinct next questions or action items the user can click,
       const actionsText = parts[1].trim();
       const extractedActions = actionsText
         .split('\n')
-        .map(a => a.replace(/^[0-9\.\-\*\s]+/, '').trim())
+        .map(a => a.replace(/^[0-9\.\-\*\s]+/, '').replace(/\*/g, '').trim())
         .filter(a => a.length > 5 && a.length < 80);
       if (extractedActions.length > 0) {
         suggestedNextActions = extractedActions.slice(0, 3);
       }
     }
+
+    // Enforce the display format regardless of what the model did: no asterisks, structured layout.
+    reply = cleanAiText(reply);
 
     if (!reply || !reply.trim()) {
       throw new StrategistError('empty_response', 'Gemma 4 returned an empty response. Please retry.', 502);

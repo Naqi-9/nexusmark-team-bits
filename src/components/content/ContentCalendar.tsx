@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CalendarDays, ChevronLeft, ChevronRight, Download, Loader2, Sparkles, X, Trash2, ExternalLink, RefreshCw, Save } from 'lucide-react';
+import { CalendarDays, ChevronLeft, ChevronRight, Download, Loader2, Sparkles, X, Trash2, ExternalLink, RefreshCw, Save, Wand2 } from 'lucide-react';
 import type { BrandProfileRecord, ProductRecord, WorkspaceRecord } from '../../services/workspaceService.ts';
 import { buildBrandContext, suggestedPillars, suggestedTone } from '../../lib/brandContext.ts';
 import { contentApi } from '../../lib/contentApi.ts';
@@ -21,7 +21,7 @@ interface Props {
   brandProfile: BrandProfileRecord | null;
   products: ProductRecord[];
   userId: string;
-  onOpenInStudio: (item: ContentItemRecord) => void;
+  onOpenInStudio: (item: ContentItemRecord, opts?: { magic?: boolean }) => void;
 }
 
 type View = 'month' | 'week' | 'list';
@@ -308,7 +308,7 @@ export function ContentCalendar({ workspace, brandProfile, products, userId, onO
 /* ------------------------------------------------------------------ */
 function EntryDrawer({ item, context, tone, objective, onClose, onSaved, onDeleted, onOpenInStudio }: {
   item: ContentItemRecord; context: unknown; tone: string; objective: string;
-  onClose: () => void; onSaved: (p: Partial<ContentItemRecord>) => void; onDeleted: () => void; onOpenInStudio: (i: ContentItemRecord) => void;
+  onClose: () => void; onSaved: (p: Partial<ContentItemRecord>) => void; onDeleted: () => void; onOpenInStudio: (i: ContentItemRecord, opts?: { magic?: boolean }) => void;
 }) {
   const [content, setContent] = useState<ContentPayload>(item.content);
   const [date, setDate] = useState(item.scheduledDate || '');
@@ -340,10 +340,10 @@ function EntryDrawer({ item, context, tone, objective, onClose, onSaved, onDelet
     } finally { lock.current = false; setBusy(null); }
   };
 
-  const openInStudio = async () => {
+  const openInStudio = async (magic = false) => {
     // Save first so the Studio always opens exactly what is stored; if saving fails, stay here.
     if (dirty && !(await save())) return;
-    onOpenInStudio({ ...item, content, status, aspectRatio: aspect, scheduledDate: date, pillar: pillar || item.pillar, topic: topic || item.topic });
+    onOpenInStudio({ ...item, content, status, aspectRatio: aspect, scheduledDate: date, pillar: pillar || item.pillar, topic: topic || item.topic }, { magic });
   };
 
   const regenerate = async () => {
@@ -405,7 +405,8 @@ function EntryDrawer({ item, context, tone, objective, onClose, onSaved, onDelet
           <div className="flex flex-wrap gap-2 border-t border-gray-200 pt-4">
             <button className={primaryBtn} onClick={save} disabled={busy !== null || !dirty}>{busy === 'save' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save entry</button>
             <button className={ghostBtn} onClick={regenerate} disabled={busy !== null}>{busy === 'regen' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />} Regenerate entry</button>
-            <button className={ghostBtn} onClick={openInStudio} disabled={busy !== null}><ExternalLink className="w-3.5 h-3.5" /> Open in Content Studio</button>
+            <button className={ghostBtn} onClick={() => openInStudio(false)} disabled={busy !== null}><ExternalLink className="w-3.5 h-3.5" /> Open in Content Studio</button>
+            <button className={primaryBtn} onClick={() => openInStudio(true)} disabled={busy !== null}><Wand2 className="w-4 h-4" /> Magic design</button>
             <button className={`${ghostBtn} ml-auto text-red-700`} onClick={remove} disabled={busy !== null}><Trash2 className="w-3.5 h-3.5" /> Delete</button>
           </div>
         </div>

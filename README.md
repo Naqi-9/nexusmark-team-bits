@@ -27,3 +27,7 @@ The API now requires a Firebase ID token on every endpoint except `GET /api/heal
 Deploy `firestore.rules` and `storage.rules` with Firebase CLI after reviewing the project and database target. Storage uploads are optional and attempted only after a real image generation response. If the bucket is not provisioned or the upload is denied, the UI keeps the generated image in the current session and explicitly labels it temporary. The project does not enable Firebase Storage or billing automatically.
 
 For image generation, configure `IMAGE_GENERATION_MODEL=gemini-3.1-flash-image` only after confirming that model access is available for your Google AI Studio API key. The app uses the configured model through the Gemini `generateContent` image response path and reports API errors rather than substituting a text model. The capability flag means configured, not verified; availability is verified only by a real generation request.
+
+
+## Phase 3 features
+See `PHASE3_NOTES.md`: asterisk-free formatted AI replies, automatic Strategist -> Content Calendar sync, Magic Design in Content Studio, and a browser voice assistant. For Magic Design to create pictures, set `IMAGE_GENERATION_MODEL` (see `.env.example`).

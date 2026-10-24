@@ -80,11 +80,13 @@ export function WorkspaceDashboard({
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState<TabType>('overview');
   const [studioSeed, setStudioSeed] = useState<ContentItemRecord | null>(null);
-  const openInStudio = useCallback((item: ContentItemRecord) => {
+  const [studioSeedMagic, setStudioSeedMagic] = useState(false);
+  const openInStudio = useCallback((item: ContentItemRecord, opts?: { magic?: boolean }) => {
     setStudioSeed(item);
+    setStudioSeedMagic(Boolean(opts?.magic));
     setActiveTab('content_studio');
   }, []);
-  const clearStudioSeed = useCallback(() => setStudioSeed(null), []);
+  const clearStudioSeed = useCallback(() => { setStudioSeed(null); setStudioSeedMagic(false); }, []);
   const [loading, setLoading] = useState(true);
   const [workspace, setWorkspace] = useState<WorkspaceRecord | null>(null);
   const [brandProfile, setBrandProfile] = useState<BrandProfileRecord | null>(null);
@@ -1023,8 +1025,12 @@ export function WorkspaceDashboard({
               workspace={workspace}
               brandProfile={brandProfile}
               userId={user?.uid || ''}
+              products={products}
               onDeliverableCreated={refreshDeliverables}
               onNavigateToDeliverables={() => setActiveTab('deliverables')}
+              onOpenCalendar={() => setActiveTab('content_calendar')}
+              onOpenStudio={() => setActiveTab('content_studio')}
+              onOpenLibrary={() => setActiveTab('content_library')}
             />
           )}
 
@@ -1038,6 +1044,7 @@ export function WorkspaceDashboard({
               userId={user.uid}
               seedItem={studioSeed && studioSeed.workspaceId === workspace.id ? studioSeed : null}
               onSeedConsumed={clearStudioSeed}
+              seedMagic={studioSeedMagic}
               onOpenLibrary={() => setActiveTab('content_library')}
             />
           )}
