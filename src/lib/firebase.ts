@@ -2,7 +2,22 @@ import { initializeApp, getApps } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
-import firebaseConfig from '../../firebase-applet-config.json';
+import fileConfig from '../../firebase-applet-config.json';
+
+// Values in firebase-applet-config.json are the defaults. If VITE_FIREBASE_* variables are set at build
+// time (e.g. in Render's Environment tab) they take precedence. These are public web identifiers, not secrets.
+const env = (import.meta as any).env || {};
+const pick = (value: unknown, fallback: string): string => (typeof value === 'string' && value.trim() ? value.trim() : fallback);
+const firebaseConfig = {
+  ...fileConfig,
+  apiKey: pick(env.VITE_FIREBASE_API_KEY, fileConfig.apiKey),
+  authDomain: pick(env.VITE_FIREBASE_AUTH_DOMAIN, fileConfig.authDomain),
+  projectId: pick(env.VITE_FIREBASE_PROJECT_ID, fileConfig.projectId),
+  appId: pick(env.VITE_FIREBASE_APP_ID, fileConfig.appId),
+  storageBucket: pick(env.VITE_FIREBASE_STORAGE_BUCKET, fileConfig.storageBucket),
+  messagingSenderId: pick(env.VITE_FIREBASE_MESSAGING_SENDER_ID, fileConfig.messagingSenderId),
+  firestoreDatabaseId: pick(env.VITE_FIREBASE_FIRESTORE_DATABASE_ID, fileConfig.firestoreDatabaseId),
+};
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
 

@@ -33,7 +33,8 @@ function expressApiPlugin(): Plugin {
 export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss(), expressApiPlugin()],
-       preview: { allowedHosts: true },
+    // Allow the hosting provider's public hostname when running `vite preview` (e.g. on Render).
+    preview: { allowedHosts: true },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

@@ -107,11 +107,11 @@ Note: `firebase-applet-config.json` contains the public Firebase web config (API
 
 ## 5. Firestore and Storage rules audit (no changes made, nothing deployed)
 
-Targets, from the project files (all consistent with each other):
-- Firebase project: `yodeling-bonbon-slxdt`
-- Firestore database: `ai-studio-b697daa1-5215-463a-8049-ab78ad384805` (named; matches `firebase.json`, `firebase-applet-config.json`, `.env.example`)
-- Storage bucket: `yodeling-bonbon-slxdt.firebasestorage.app`
-There is no `.firebaserc`, so a deploy must pass `--project yodeling-bonbon-slxdt` explicitly. Rules were **not** deployed.
+Targets (UPDATED after this report was first written: the app was moved to a new Firebase project):
+- Firebase project: `nexusmark-app`
+- Firestore database: `(default)` (assumed; confirm in the console)
+- Storage bucket: `nexusmark-app.firebasestorage.app` (assumed; confirm in the console)
+There is no `.firebaserc`, so a deploy must pass `--project nexusmark-app` explicitly. Rules were **not** deployed; paste them in the console or deploy yourself.
 
 Reviewed by reading, **not executed** (emulator tests are written in `rules-tests/rules.test.mjs`, unrun):
 - All collections require `ownerId == request.auth.uid` for read/update/delete; create requires `ownerId == uid`; list is only allowed for owner-filtered queries.

@@ -1,12 +1,9 @@
 {
-  "projectId": "yodeling-bonbon-slxdt",
-  "appId": "1:984593043179:web:28dc57f47e104002ecb8ae",
-  "apiKey": "AIzaSyBH1Q4W9sWfo3m61UbOjIy8rsUuaBnH-Eg",
-  "authDomain": "yodeling-bonbon-slxdt.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-b697daa1-5215-463a-8049-ab78ad384805",
-  "storageBucket": "yodeling-bonbon-slxdt.firebasestorage.app",
-  "messagingSenderId": "984593043179",
-  "measurementId": "",
-  "oAuthClientId": "984593043179-eu63l2uma5cntj3qasi1vjjur5c4a0dt.apps.googleusercontent.com",
-  "recaptchaSiteKey": ""
+  "projectId": "nexusmark-app",
+  "appId": "1:567010744192:web:8487fd406419312d841365",
+  "apiKey": "AIzaSyDo476riYAnUiO_M0Xaf_pjlncfsU73CUc",
+  "authDomain": "nexusmark-app.firebaseapp.com",
+  "firestoreDatabaseId": "(default)",
+  "storageBucket": "nexusmark-app.firebasestorage.app",
+  "messagingSenderId": "567010744192"
 }
